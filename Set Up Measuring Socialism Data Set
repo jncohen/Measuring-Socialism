@@ -1,0 +1,497 @@
+#Measuring Socialism Data Set Up Script
+#Joseph Nathan Cohen
+#Department of Sociology
+#City University of New York, Queens College
+#www.josephnathancohen.info
+#Version 1.0
+
+
+#Preliminaries
+
+knitr::opts_chunk$set(echo = F)
+
+rm(list=ls())
+gc()
+options(scipen=999)
+set.seed(123)
+
+directory <- "E:/Dropbox/Research/Socialism"
+setwd(directory)
+
+library(ggplot2)
+library(scales)
+library(WDI)
+library(countrycode)
+library(dplyr)
+library(panelView)
+library(OECD)
+library(doBy)
+library(readxl)
+library(corrplot)
+
+
+#Fetch World Bank Metrics
+data <- WDI(country = "all", indicator = "SP.POP.TOTL", start = 1960, end = 2017, extra = T)
+data$ccode <- countrycode(data$iso3c, 'iso3c', 'cown')
+data$id <- (data$ccode * 10000) + data$year
+data <- subset(data, !is.na(id))
+data <- data[c(13,12,4,2, 6,10,3)]
+names(data)[7] <- paste("pop")
+
+wb.addvar<- function(indicator, vname, 
+                               start = 1960, end = 2017,
+                               Extra = T, Country = "all"){
+  require(WDI)
+  temp.dat <- WDI(country = Country, indicator = indicator,
+              start = start, end = end, extra = Extra)
+  temp.dat <- data.frame(temp.dat)
+  temp.dat$ccode <- countrycode(temp.dat$iso3c, 'iso3c', 'cown')
+  temp.dat$ccode <- as.numeric(as.character(temp.dat$ccode))
+  temp.dat$id <- (temp.dat$ccode * 10000) + temp.dat$year
+  temp.dat <- subset(temp.dat, !is.na(id))
+  temp.dat <- temp.dat[c(13,3)]
+  names(temp.dat)[2] <- paste(vname)
+  data <<- merge(data, temp.dat, by = "id")
+  rm(temp.dat)
+  }
+
+wb.addvar("NY.GDP.PCAP.KD", "gdppc.rus")   #Per Capita GDP in 2000 US$
+wb.addvar("NY.GDP.MKTP.CN", "gdp.lcu")      #GDP in LCU
+wb.addvar("NE.CON.GOVT.ZS", "gcon.gdp")     #General govenrment consumption expenditures to GDP
+wb.addvar("GC.TAX.TOTL.GD.ZS", "tax.gdp")   #Central Govt. Taxes (% GDP)
+wb.addvar("TM.TAX.MRCH.SM.AR.ZS", "tariff.mean")  #Simple Mean Tariff Rate on All Products
+wb.addvar("TM.TAX.MRCH.WM.AR.ZS", "tariff.wmean") #Weighted Mean Tariff Rate on All Products
+wb.addvar("MS.MIL.XPND.GD.ZS", "mil.gdp") #Military to GDP
+
+#Consolidate to country-level set
+wb.data <- subset(data, year>=2015 & year<=2017)
+wb.data.id <- subset(wb.data, year==2017)
+wb.data.id <- wb.data.id[c(2,4,5,6)]
+
+wb.data <- summaryBy(ccode + pop + gdppc.rus + gcon.gdp + tax.gdp + tariff.mean + tariff.wmean + mil.gdp ~ ccode, data = wb.data)
+wb.data <- wb.data[-2]
+names(wb.data) <- paste(c("ccode", "w.pop", "w.gdppc.rus", "gcon.gdp", "w.tax.gdp", "w.tariff.mean", "w.tariff.wmean", "w.mil.gdp"))
+
+
+#Fetch OECD GOV2017 Data
+
+oecd.cat <- data.frame(get_datasets())      #Fetch catalog
+filter(oecd.cat, grepl("Government",title)) #Keywork lookup
+
+gov2017 <- get_dataset("GOV_2017")
+gov2017 <- data.frame(gov2017)
+names(gov2017) <- paste(c("iso3c", "IND", "TF", "UNIT", "POWERCODE", "year", "value", "OBS_STATUS"))
+gov2017 <- subset(gov2017, year >= 2013 & year<=2015)
+gov2017 <- gov2017[c(1, 2, 6, 7)]
+gov2017$ccode <- countrycode(gov2017$iso3c, 'iso3c', 'cown')
+gov2017$year <- as.numeric(as.character(gov2017$year))
+gov2017$value <- as.numeric(as.character(gov2017$value))
+gov2017$id <- (gov2017$ccode * 10000) + gov2017$year
+gov2017 <- subset(gov2017, !is.na(id))
+
+codebook <- get_data_structure("gov_2017")
+write.csv(codebook$CL_GOV_2017_IND, file="TEMP OECD Codeboo.csv")
+
+temp.0 <- summaryBy(value ~ ccode + IND, data = gov2017)
+i <- "AH_UNMETN_HI"
+temp <- subset(temp.0, IND == i)
+names(temp)[3] <- paste(i)
+temp <- temp[c(1,3)]
+oecd.data <- temp
+for (i in names(table(gov2017$IND))){
+  temp <- subset(temp.0, IND == i)
+  names(temp)[3] <- paste(i)
+  temp <- temp[c(1,3)]
+  oecd.data <- merge(oecd.data, temp, by = "ccode", all = T)
+}
+
+oecd.data <- oecd.data[c("ccode", "GGD_GDP", "GLBF90_GDP", "GTR_GDP", "STRGS13R_TAX",
+                         "STRGS13R_D61", "STRGS13R_P11_12_131", "STRGS13R_CCG_OR",
+                         "STRTAXR_1000", "STRTAXR_2000","STRTAXR_3000",
+                         "STRTAXR_4000","STRTAXR_5000", "STRTAXR_6000", "GTE_GDP",
+                         "STRGE_F_G010GS13_GDP" , "STRGE_F_G020GS13_GDP" , 
+                         "STRGE_F_G030GS13_GDP" , "STRGE_F_G040GS13_GDP" , 
+                         "STRGE_F_G050GS13_GDP" ,"STRGE_F_G060GS13_GDP" , 
+                         "STRGE_F_G070GS13_GDP" , "STRGE_F_G080GS13_GDP" , 
+                         "STRGE_F_G090GS13_GDP" , "STRGE_F_G100GS13_GDP",
+                         "GINV_GDP", "STROUT_GSU", "EMGG_TOT")]
+
+rm(oecd.cat, temp, temp.0, wb.data.id, gov2017, i, codebook)
+
+data <- merge(wb.data, oecd.data, by = "ccode", all = T)
+
+data <- data[c(1, 2, 22, 4, 24, 8, 25:32, 23, 33, 11, 10, 34, 35, 7)]
+names(data) <- paste(c("ccode", "population", "expenditures", "consumption", "military",
+                       "military.wdi","order", "econaffairs", "environment", "housing", 
+                       "health", "recreation", "education", "socprot", "genservices",
+                       "ginv", "revenues", "gfinworth", "gout", "gemp", "tariffs"))
+
+
+rm(wb.data, oecd.data, wb.addvar)
+
+#Fetch OECD Social Protection Data
+
+oecd.cat <- data.frame(get_datasets())      #Fetch catalog
+filter(oecd.cat, grepl("Social",title)) #Keywork lookup
+socprot <- get_dataset("SOCX_AGG")
+
+socprot <- data.frame(socprot)
+catalog <- get_data_structure("SOCX_AGG")
+
+socprot.1 <- subset(socprot, obsTime ==2015)
+socprot.2 <- subset(socprot.1, COUNTRY != "OECD")
+socprot.3 <- subset(socprot.2, SOURCE != 30)
+socprot.4 <- subset(socprot.3, TYPEXP == 0)
+socprot.5 <- subset(socprot.4, UNIT == "PCT_GDP")
+socprot.6 <- subset(socprot.5, TYPROG == 0)
+write.csv(socprot.6, file = "SOCX_AGG.csv")
+
+socprot.a <- read.csv("SOCX_AGG.csv")
+
+branches <- c("oldage", "survivors", "incap", "health", "family", "labmkt", "unempl", "housing", "other", "total")
+oldage <- subset(socprot.a, BRANCH==1)
+survivors <- subset(socprot.a, BRANCH==2)
+incap <- subset(socprot.a, BRANCH==3)
+health <- subset(socprot.a, BRANCH==4)
+family <- subset(socprot.a, BRANCH==5)
+labmkt <- subset(socprot.a, BRANCH==6)
+unempl <- subset(socprot.a, BRANCH==7)
+housing <- subset(socprot.a, BRANCH==8)
+other <- subset(socprot.a, BRANCH==9)
+total <- subset(socprot.a, BRANCH==90)
+
+for (i in branches){
+  temp <- get(i)
+  temp <- temp[-1]
+  temp <- temp[c(1, 6, 12)]
+  names(temp) <- paste(c("source", "iso3c", "obs"))
+  temp$ccode <- countrycode(temp$iso3c, "iso3c", "cown")
+  temp <- temp[-2]
+  
+  temp.pub <- subset(temp, source == 10)
+  temp.pub <- temp.pub[-1]
+  names(temp.pub) <- paste(c("obs.pub", "ccode"))
+  
+  
+  temp.manpriv <- subset(temp, source == 20)
+  temp.manpriv <- temp.manpriv[-1]
+  names(temp.manpriv) <- paste(c("obs.manpriv", "ccode"))
+
+  temp.1 <- merge(temp.pub, temp.manpriv, by = "ccode")
+  temp.1$obs <- ifelse(is.na(temp.1$obs.pub) & is.na(temp.1$obs.manpriv), NA,
+                       rowSums(temp.1[2:3], na.rm=T))
+  
+  names(temp.1) <- paste(c("ccode", paste0("soc.",i,".pub"), paste0("soc.",i,".mpriv"), paste0("soc.", i, ".tot")))
+  temp.1 <- temp.1[c(1,4)]
+  assign(paste0(i, ".1"), temp.1)
+  
+}
+
+data.soc <- oldage.1
+for (i in branches[-1]){
+  temp <- get(paste0(i, ".1"))
+  data.soc <<- merge(data.soc, temp, by="ccode", all = T)
+}
+
+write.csv(data.soc, file = "OECD Social Protection - Pct GDP - 2015.csv")
+
+names(data.soc) <- c("ccode", "soc.oldage", "soc.survivors", "soc.incap", "soc.health", "soc.family", "soc.labmkt", "soc.unempl", "soc.housing", "soc.other", "soc.total")
+temp <- merge(data, data.soc, by = "ccode")
+data <- temp
+
+rm(list=setdiff(ls(), c("directory", "data")))
+
+
+
+#Fetch OECD Product Regulation Data
+
+oecd.cat <- data.frame(get_datasets())      #Fetch catalog
+filter(oecd.cat, grepl("Regulation",title)) #Keywork lookup
+prodreg <- get_dataset("PMR")
+prodreg <- data.frame(prodreg)
+catalog <- get_data_structure("PMR")
+
+prodreg.1 <- subset(prodreg, obsTime == 2013)
+
+indicators <- c("prodmarket", "statecontrol", "pubown", "bizinvolve", "entbarrs", "startup", "barriers", "barriers.expl", "barriers.other", "soes", "commandreg", "pricecon", "permits", "complexreg", "commrules", "aburd.major", "aburd.sole", "legbarrs", "incumbents", "antitrustex", "tariffs", "directcontrols", "fdibarrs", "govnet", "netbarrs", "govsoes", "servbarrs", "forreg", "bartfacil")
+prodmarket <- subset(prodreg.1, IND == "PMR")
+statecontrol <- subset(prodreg.1, IND == "STC")
+pubown <- subset(prodreg.1, IND == "POW")
+bizinvolve <- subset(prodreg.1, IND == "IBO")
+entbarrs <- subset(prodreg.1, IND =="BTE")
+startup <- subset(prodreg.1, IND =="ABS")
+barriers <- subset(prodreg.1, IND =="BTI")
+barriers.expl <- subset(prodreg.1, IND =="XBR")
+barriers.other <- subset(prodreg.1, IND =="OBR")
+soes<- subset(prodreg.1, IND =="SCP")
+commandreg <- subset(prodreg.1, IND =="CCR")
+pricecon <- subset(prodreg.1, IND =="PCT")
+permits <- subset(prodreg.1, IND =="LPS")
+complexreg <- subset(prodreg.1, IND =="CRP")
+commrules <- subset(prodreg.1, IND =="CSR")
+aburd.major <- subset(prodreg.1, IND =="ABC")
+aburd.sole <- subset(prodreg.1, IND =="ABP")
+legbarrs <- subset(prodreg.1, IND =="LBR")
+incumbents <- subset(prodreg.1, IND =="RPI")
+antitrustex <- subset(prodreg.1, IND =="ATX")
+tariffs <- subset(prodreg.1, IND =="TRF")
+directcontrols <- subset(prodreg.1, IND =="DCB")
+fdibarrs <- subset(prodreg.1, IND =="FDI")
+govnet <- subset(prodreg.1, IND =="GIN")
+netbarrs <- subset(prodreg.1, IND =="BEN")
+govsoes <- subset(prodreg.1, IND =="GOV")
+servbarrs <- subset(prodreg.1, IND =="BSS")
+forreg <- subset(prodreg.1, IND =="TFS")
+bartfacil <- subset(prodreg.1, IND == "TRD")
+
+for (i in indicators){
+  temp <- get(i)
+  temp <- temp[c(2,5)]
+  temp$ccode <- countrycode(temp$COU, 'iso3c', 'cown')
+  temp <- temp[c(3,2)]
+  names(temp) <- paste(c("ccode", paste0("reg.", i)))
+  assign(i, temp)
+}
+
+data.reg <- prodmarket
+for (i in indicators[-c(1)]){
+  temp <- get(i)
+  data.reg <<- merge(data.reg, temp, by = "ccode", all = T)
+}
+
+data <- merge(data, data.reg, by = "ccode")
+rm(list=setdiff(ls(), c("directory", "data")))
+
+
+#Fetch OECD Regulation Utilities Data
+
+oecd.cat <- data.frame(get_datasets())      #Fetch catalog
+filter(oecd.cat, grepl("Regulation",title)) #Keywork lookup
+utilreg <- get_dataset("ETCR")
+utilreg <- data.frame(utilreg)
+catalog <- get_data_structure("ETCR")
+
+utilreg.1 <- subset(utilreg, obsTime == 2013)
+utilreg.1 <- utilreg.1[c(1,2,5)]
+
+metrics <- catalog$IND$id
+for (i in metrics){
+  if (length(utilreg.1$IND[utilreg.1$IND == i]) == 0){
+    next
+  }
+  temp <- subset(utilreg.1, IND == i)
+  temp$ccode <- countrycode(temp$COU, 'iso3c', 'cown')
+  temp <- temp[c(4,3)]
+  names(temp)[2] <- paste(paste0(i))
+  assign(i, temp)
+}
+
+variables <- ls()[-c(5:7,18,19:21,36,40:41)]
+dat.reg <- AEN
+for (i in variables[-1]){
+  print(i)
+  temp <- get(i)
+  dat.reg <<- merge(dat.reg, temp, by="ccode", all = T)
+}
+
+names(dat.reg) <- c("ccode", "reg.utilities", "reg.airlines", "reg.telecoms", "reg.electricity", "reg.gas", "reg.post", "reg.rail", "reg.road", "reg.airlines.pubown", "reg.airlines.entry", "reg.telecoms.entry", "reg.telecoms.pubown", "reg.telecoms.mktstr", "reg.electricity.entry", "reg.electricity.pubown", "reg.electricity.vertint", "reg.gas.entry", "reg.gas.pubown", "reg.gas.mktstr", "reg.post.entry", "reg.post.mktstr", "reg.rail.entry", "reg.rail.pubown", "reg.rail.mktstr", "reg.rail.vertint", "reg.road.entry", "reg.road.prices", "reg.utils.entry", "reg.utils.nopubown", "reg.elect.mktstr", "reg.post.mktstr")
+
+temp <- merge(data, dat.reg, by = "ccode")
+rm(list=setdiff(ls(), c("directory", "data")))
+
+
+#Fetch OECD Product Market Data
+
+oecd.cat <- data.frame(get_datasets())      #Fetch catalog
+filter(oecd.cat, grepl("Professional",title)) #Keywork lookup
+profreg <- get_dataset("PROFSVC")
+profreg <- data.frame(profreg)
+catalog <- get_data_structure("PROFSVC")
+
+profreg.1 <- subset(profreg, obsTime == 2013)
+profreg.1$ccode <- countrycode(profreg.1$COU, 'iso3c', 'cown')
+profreg.1 <- profreg.1[c(1,2,6,7)]
+
+legal <- subset(profreg.1, PRO == "LEG")
+legal.reg <- subset(legal, IND == "ALL")
+legal.entry <- subset(legal, IND == "ER")
+legal.entry.excl <- subset(legal, IND == "ERLC")
+legal.entry.edu <- subset(legal, IND == "ERED")
+legal.entry.mem <- subset(legal, IND == "ERMEM")
+legal.entry.quot <- subset(legal, IND == "ERQT")
+legal.conduct <- subset(legal, IND == "CR")
+legal.conduct.prices <- subset(legal, IND == "MCIC23")
+legal.conduct.bizform <- subset(legal, IND == "MCIC1")
+legal.conduct.adv <- subset(legal, IND == "MCIC22")
+legal.conduct.coop <- subset(legal, IND == "MCIC2")
+
+arch <- subset(profreg.1, PRO == "ARC")
+arch.reg <- subset(arch, IND == "ALL")
+arch.entry <- subset(arch, IND == "ER")
+arch.entry.excl <- subset(arch, IND == "ERLC")
+arch.entry.edu <- subset(arch, IND == "ERED")
+arch.entry.mem <- subset(arch, IND == "ERMEM")
+arch.entry.quot <- subset(arch, IND == "ERQT")
+arch.conduct <- subset(arch, IND == "CR")
+arch.conduct.prices <- subset(arch, IND == "MCIC23")
+arch.conduct.bizform <- subset(arch, IND == "MCIC1")
+arch.conduct.adv <- subset(arch, IND == "MCIC22")
+arch.conduct.coop <- subset(arch, IND == "MCIC2")
+
+eng <- subset(profreg.1, PRO == "ENG")
+eng.reg <- subset(eng, IND == "ALL")
+eng.entry <- subset(eng, IND == "ER")
+eng.entry.excl <- subset(eng, IND == "ERLC")
+eng.entry.edu <- subset(eng, IND == "ERED")
+eng.entry.mem <- subset(eng, IND == "ERMEM")
+eng.entry.quot <- subset(eng, IND == "ERQT")
+eng.conduct <- subset(eng, IND == "CR")
+eng.conduct.prices <- subset(eng, IND == "MCIC23")
+eng.conduct.bizform <- subset(eng, IND == "MCIC1")
+eng.conduct.adv <- subset(eng, IND == "MCIC22")
+eng.conduct.coop <- subset(eng, IND == "MCIC2")
+
+acc <- subset(profreg.1, PRO == "ACT")
+acc.reg <- subset(acc, IND == "ALL")
+acc.entry <- subset(acc, IND == "ER")
+acc.entry.excl <- subset(acc, IND == "ERLC")
+acc.entry.edu <- subset(acc, IND == "ERED")
+acc.entry.mem <- subset(acc, IND == "ERMEM")
+acc.entry.quot <- subset(acc, IND == "ERQT")
+acc.conduct <- subset(acc, IND == "CR")
+acc.conduct.prices <- subset(acc, IND == "MCIC23")
+acc.conduct.bizform <- subset(acc, IND == "MCIC1")
+acc.conduct.adv <- subset(acc, IND == "MCIC22")
+acc.conduct.coop <- subset(acc, IND == "MCIC2")
+
+metrics <- c("legal.reg", "legal.entry", "legal.entry.excl", "legal.entry.edu", "legal.entry.mem", "legal.entry.quot", "legal.conduct", "legal.conduct.prices", "legal.conduct.bizform", "legal.conduct.adv", "legal.conduct.coop", "arch.reg", "arch.entry", "arch.entry.excl", "arch.entry.edu", "arch.entry.mem", "arch.entry.quot", "arch.conduct", "arch.conduct.prices", "arch.conduct.bizform", "arch.conduct.adv", "arch.conduct.coop", "eng.reg", "eng.entry", "eng.entry.excl", "eng.entry.edu", "eng.entry.mem", "eng.entry.quot", "eng.conduct", "eng.conduct.prices", "eng.conduct.bizform", "eng.conduct.adv", "eng.conduct.coop", "acc.reg", "acc.entry", "acc.entry.excl", "acc.entry.edu", "acc.entry.mem", "acc.entry.quot", "acc.conduct", "acc.conduct.prices", "acc.conduct.bizform", "acc.conduct.adv", "acc.conduct.coop")
+
+dat.prof <- legal.reg
+dat.prof <- dat.prof[c(4,3)]
+names(dat.prof)[2] <- paste("reg.prof.legal.reg")
+for (i in metrics[-1]){
+  temp <- get(i)
+  temp <- temp[c(4,3)]
+  names(temp)[2] <- paste(paste0("reg.prof.", i))
+  dat.prof <<- merge(dat.prof, temp, by = "ccode", all = T)
+}
+
+temp <- merge(data, dat.prof, by = "ccode")
+data <- temp
+
+rm(list=setdiff(ls(), c("directory", "data")))
+
+#Fetch OECD Consumer Market Regulation
+oecd.cat <- data.frame(get_datasets())      #Fetch catalog
+filter(oecd.cat, grepl("Regulation",title)) #Keywork lookup
+retreg <- get_dataset("RETAIL")
+retreg <- data.frame(retreg)
+catalog <- get_data_structure("RETAIL")
+
+retreg.1 <- subset(retreg, obsTime == 2013)
+
+overall <- subset(retreg.1, IND == "SUM")
+reglic <- subset(retreg.1, IND == "LPC")
+largeo <- subset(retreg.1, IND == "SRO")
+protfirms <- subset(retreg.1, IND == "PEF")
+ophours <- subset(retreg.1, IND == "ROO")
+pricecon <- subset(retreg.1, IND == "PCL")
+promo <- subset(retreg.1, IND == "PRO")
+metrics <- c("overall", "reglic", "largeo", "protfirms", "ophours", "pricecon", "promo")
+
+dat.ret <- overall
+dat.ret$ccode <- countrycode(dat.ret$COU, 'iso3c', 'cown')
+dat.ret <- dat.ret[c(6,5)]
+names(dat.ret)[2] <- paste("reg.ret.overall")
+for (i in metrics[-1]){
+  temp <- get(i)
+  temp$ccode <- countrycode(temp$COU, 'iso3c', 'cown')
+  temp <- temp[c(6,5)]
+  names(temp)[2] <- paste(paste0("reg.ret.", i))
+  dat.ret <<- merge(dat.ret, temp, by = "ccode")
+}
+
+data <- merge(data, dat.ret, by = "ccode", all = T)
+rm(list=setdiff(ls(), c("directory", "data")))
+
+
+#Fetch OECD Tax Data
+oecd.cat <- data.frame(get_datasets())      #Fetch catalog
+filter(oecd.cat, grepl("Revenue",title)) #Keywork lookup
+rev <- get_dataset("REV")
+rev <- data.frame(rev)
+catalog <- get_data_structure("REV")
+
+rev.1 <- subset(rev, obsTime == 2015)
+
+write.csv(rev.1, file = "REV.csv")
+rev <- read.csv("REV.csv")
+rev <- subset(rev, VAR == "TAXGDP")
+rev$ccode <- countrycode(rev$COU, 'iso3c', 'cown')
+
+supra <- subset(rev, GOV == "SUPRA")
+fed <- subset(rev, GOV == "FED")
+state <- subset(rev, GOV == "STATE")
+local <- subset(rev, GOV == "LOCAL")
+socsec <- subset(rev, GOV == "SOCSEC")
+all <- subset(rev, GOV == "NES")
+level = c("supra", "fed", "state", "local", "socsec", "all")
+type <- c("tot", "inc", "inc.indiv", "inc.corp", "inc.oth", "ss", "ss.workers", "ss.emplr",
+          "ss.self", "ss.oth", "payroll", "prop", "prop.wealth", "prop.estate", "prop.ftrans",
+          "prop.nonrecur", "prop.oth", "gst", "gst.xfer", "gst.use", "gst.oth", "other")
+for (i in level){
+  temp <- get(i)
+  tot <- subset(temp, TAX == "TOTALTAX")
+  inc <- subset(temp, TAX == "1000")
+  inc.indiv  <- subset(temp, TAX =="1100")
+  inc.corp  <- subset(temp, TAX =="1200")
+  inc.oth  <- subset(temp, TAX =="1300")
+  ss <- subset(temp, TAX =="2000")
+  ss.workers <- subset(temp, TAX =="2100")
+  ss.emplr <- subset(temp, TAX =="2200")
+  ss.self <- subset(temp, TAX =="2300")
+  ss.oth <- subset(temp, TAX =="2400")
+  payroll <- subset(temp, TAX == "3000")
+  prop  <- subset(temp, TAX == "4000")
+  prop.wealth  <- subset(temp, TAX == "4200")
+  prop.estate  <- subset(temp, TAX == "4300")
+  prop.ftrans  <- subset(temp, TAX == "4400")
+  prop.nonrecur  <- subset(temp, TAX == "4500")
+  prop.oth  <- subset(temp, TAX == "4600")
+  gst  <- subset(temp, TAX == "5000")
+  gst.xfer  <- subset(temp, TAX == "5100")
+  gst.use  <- subset(temp, TAX == "5200")
+  gst.oth <- subset(temp, TAX == "5300")
+  other  <- subset(temp, TAX == "6000")
+  for (j in type){
+    temp.dat <- get(j)
+    temp.dat <- temp.dat[c(11,10)]
+    temp.dat <- subset(temp.dat, !is.na(ccode))
+    names(temp.dat)[2] <- paste(paste0("tax.", i, ".", j))
+    assign(paste0("tax.", i, ".", j), temp.dat)
+    }
+}
+
+
+dat.tax <- tax.supra.tot
+for (i in type[-1]){
+  temp <- get(paste0("tax.supra.",i))
+  dat.tax <<- merge(dat.tax, temp, by = "ccode", all=T)
+  gc()
+}
+
+for (i in level[-1]){
+  for (j in type){
+    temp <- get(paste0("tax.",i,".",j))
+    dat.tax <<- merge(dat.tax, temp, by = "ccode", all=T)
+    gc()
+  }
+}
+
+data <- merge(data, dat.tax, by = "ccode", all = T)
+rm(list=setdiff(ls(), c("directory", "data")))
+
+
+#Export Data
+
+write.csv(data, file = "Measuring Socialism Data.csv")
