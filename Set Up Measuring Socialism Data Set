@@ -15,7 +15,8 @@ gc()
 options(scipen=999)
 set.seed(123)
 
-directory <- "E:/Dropbox/Research/Socialism"
+directory <- "E:/Dropbox/Research/Measuring Socialism Data Set"
+
 setwd(directory)
 
 library(ggplot2)
@@ -121,9 +122,9 @@ rm(oecd.cat, temp, temp.0, wb.data.id, gov2017, i, codebook)
 data <- merge(wb.data, oecd.data, by = "ccode", all = T)
 
 data <- data[c(1, 2, 22, 4, 24, 8, 25:32, 23, 33, 11, 10, 34, 35, 7)]
-names(data) <- paste(c("ccode", "population", "expenditures", "consumption", "military",
-                       "military.wdi","order", "econaffairs", "environment", "housing", 
-                       "health", "recreation", "education", "socprot", "genservices",
+names(data) <- paste(c("ccode", "population", "exp.total", "exp.consumption", "exp.military",
+                       "exp.military.wdi","order", "exp.econaffairs", "exp.environment", "exp.housing", 
+                       "exp.health", "exp.recreation", "exp.education", "exp.socprot", "exp.genservices",
                        "ginv", "revenues", "gfinworth", "gout", "gemp", "tariffs"))
 
 
